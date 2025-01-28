@@ -1,54 +1,95 @@
-! Suma de vectores: W = U + V
-suma_vect:
-    ld [%i1], %l0     ! Cargar primer elemento de U en %l0
-    ld [%i2], %l1     ! Cargar primer elemento de V en %l1
-    add %l0, %l1, %l2 ! Sumar U + V y almacenar en %l2
-    st %l2, [%i3]     ! Guardar el resultado en W
-    retl
-    nop
+! Sección de datos
+.section ".bss"
+    pasos:       .word   1         ! Número de pasos (1)
+    Kv:          .word   0         ! Constante de viscosidad
+    m:           .word   0         ! Masa
+    t:           .word   0         ! Delta de tiempo
+    Pos_i:       .word   0, 0      ! Posición inicial (x, y)
+    V_i:         .word   0, 0      ! Velocidad inicial (Vx, Vy)
+    F:           .word   0, 0      ! Fuerza (Fx, Fy)
+    V:           .word   0, 0      ! Velocidad actual (Vx, Vy)
+    delta_pos:   .word   0, 0      ! Cambio de posición (dx, dy)
+    pos_lista:   .skip   400       ! Espacio para almacenar posiciones (200 pasos máx, 2 componentes por paso)
 
-! Escalamiento de vector: W = K * U
-escala_vect:
-    ld [%i1], %l0     ! Cargar primer elemento de U en %l0
-    mov %i2, %l1      ! Cargar escalar K en %l1
-    mulx %l0, %l1, %l2 ! Multiplicar U * K
-    st %l2, [%i3]     ! Guardar el resultado en W
-    retl
-    nop
+! Sección de código
+.section ".text"
+.global main
 
-! División escalar de vector: W = U / K
-vector_sobre_esc:
-    ld [%i1], %l0     ! Cargar primer elemento de U en %l0
-    mov %i2, %l1      ! Cargar escalar K en %l1
-    sdivx %l0, %l1, %l2 ! Dividir U / K
-    st %l2, [%i3]     ! Guardar el resultado en W
+main:
+    ! Inicialización
+    LD    [%lo(V_i)], %o0       ! Cargar Vx inicial en %o0
+    ST    %o0, [%lo(V)]         ! Guardar Vx en V[0]
+    LD    [%lo(V_i)+4], %o1     ! Cargar Vy inicial en %o1
+    ST    %o1, [%lo(V)+4]       ! Guardar Vy en V[1]
+    LD    [%lo(Pos_i)], %o2     ! Cargar Pos_x inicial en %o2
+    ST    %o2, [%lo(pos_lista)] ! Guardar Pos_x inicial en lista[0]
+    LD    [%lo(Pos_i)+4], %o3   ! Cargar Pos_y inicial en %o3
+    ST    %o3, [%lo(pos_lista)+4]! Guardar Pos_y inicial en lista[1]
+    LD    [%lo(t)], %o5         ! Cargar delta de tiempo en %o5
+
+    ! Calcular F = -Kv * V
+    LD    [%lo(Kv)], %o6       ! Cargar Kv en %o6
+    LD    [%lo(V)], %o7        ! Cargar Vx en %o7
+    SMUL    %o6, %o7, %o8        ! F_x = Kv * Vx
+    NEG    %o8                  ! F_x = -F_x
+    ST    %o8, [%lo(F)]        ! Guardar F_x en F[0]
+    LD    [%lo(V)+4], %o7      ! Cargar Vy en %o7
+    SMUL    %o6, %o7, %o8        ! F_y = Kv * Vy
+    NEG    %o8                  ! F_y = -F_y
+    ST    %o8, [%lo(F)+4]      ! Guardar F_y en F[1]
+
+    ! Calcular a = F / m
+    LD    [%lo(m)], %o9        ! Cargar m en %o9
+    LD    [%lo(F)], %o10       ! Cargar F_x en %o10
+    SDIV    %o10, %o9, %o11      ! a_x = F_x / m
+    ST    %o11, [%lo(delta_pos)] ! Guardar a_x en delta_pos[0]
+    LD    [%lo(F)+4], %o10     ! Cargar F_y en %o10
+    SDIV    %o10, %o9, %o11      ! a_y = F_y / m
+    ST    %o11, [%lo(delta_pos)+4] ! Guardar a_y en delta_pos[1]
+
+    ! Calcular nueva velocidad: V = V + a * t
+    LD    [%lo(delta_pos)], %o12 ! Cargar a_x en %o12
+    SMUL    %o12, %o5, %o12      ! a_x * t
+    LD    [%lo(V)], %o13       ! Cargar Vx actual
+    ADD    %o13, %o12, %o13     ! Vx = Vx + (a_x * t)
+    ST    %o13, [%lo(V)]       ! Guardar nuevo Vx
+    LD    [%lo(delta_pos)+4], %o12 ! Cargar a_y en %o12
+    SMUL    %o12, %o5, %o12      ! a_y * t
+    LD    [%lo(V)+4], %o13     ! Cargar Vy actual
+    ADD    %o13, %o12, %o13     ! Vy = Vy + (a_y * t)
+    ST    %o13, [%lo(V)+4]     ! Guardar nuevo Vy
+
+    ! Calcular nueva posición: delta_pos = V * t + (a*t*t)/2  
+    ! Para el componente X
+    SMUL    %o5, %o5, %o14       ! t*t
+    LD    [%lo(delta_pos)], %o12 ! Cargar a_x en %o12
+    SMUL    %o12, %o14, %o14     ! t*t*a
+    LD    [%lo(V)], %o15       ! Cargar Vx
+    SMUL    %o15, %o5, %o18      ! dx = Vx * t
+    ADD    %o18, %o14, %o14     
+    MOV    2, %l2              ! Cargar el divisor (2) en un registro temporal
+    SDIV    %o14, %l2, %o14    ! División por 2
+    ST    %o14, [%lo(delta_pos)] ! Guardar dx
     
-acumula_pasos:
-    ! %i0: número de elementos de los vectores
-    ! %i1: dirección de memoria de Pos_i
-    ! %i2: dirección de memoria de V_i
-    ! %i3: escalar KV
-    ! %i4: escalar Paso
-    ! %i5: escalar t
+    ! Para el componente y
+    SMUL    %o5, %o5, %o14       ! t*t
+    LD    [%lo(delta_pos)+4], %o12 ! Cargar a_y en %o12
+    SMUL    %o12, %o14, %o14     ! t*t*a
+    LD    [%lo(V)+4], %o15       ! Cargar Vy
+    SMUL    %o15, %o5, %o18      ! dx = Vy * t
+    ADD    %o18, %014, %o14     
+    MOV    2, %l2              ! Cargar el divisor (2) en un registro temporal
+    SDIV    %o14, %l2, %o14    ! División por 2
+    ST    %o14, [%lo(delta_pos)+4] ! Guardar dy
 
-    ! %o0: número de elementos del vector
-    ! %o1: número de vectores retornados
-    ! %o2: dirección de memoria de la lista
+    ! Actualizar posición y guardar en lista
+    LD    [%lo(pos_lista)], %o16          ! Cargar Pos_x actual
+    ADD    %o16, %o14, %o16     ! Pos_x = Pos_x + dx
+    ST    %o16, [%lo(pos_lista)+8]        ! Guardar en lista siguiente posición X
+    LD    [%lo(pos_lista)+4], %o17        ! Cargar Pos_y actual
+    ADD    %o17, %o15, %o17     ! Pos_y = Pos_y + dy
+    ST    %o17, [%lo(pos_lista)+12]       ! Guardar en lista siguiente posición Y
 
-    mov %i4, %o0  ! Inicializa índice paso en %o0
+    RETL                       ! Finalizar el programa
+    NOP
 
-ciclo:
-    subcc %o0, 1, %o0  ! Decrementa el índice paso
-    be fin             ! Si llega a cero, termina
-    nop                ! Relleno de pipeline
-
-    mov %i2, %i1       ! Mueve la dirección de V_i a %i1
-    mov %i3, %i2       ! Mueve KV a %i2
-    set ? , %i3        ! Falta definir el valor de %i3 (¿dirección de memoria?)
-
-    call escala_vect   ! Llama a la función escala_vect
-    nop                ! Relleno de pipeline
-
-fin:
-    retl               ! Retorno de la función
-    nop
